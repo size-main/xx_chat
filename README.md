@@ -20,8 +20,7 @@
 --Client
     --C++           // C++客户端(未实现)
     --python        // python客户端(实现基础功能)
---ESP32Client       // ESP32客户端(未实现)
---loadServer        // (C++)服务端(已实现基础功能)
+--Server        // (C++)服务端(已实现基础功能)
     --mysqllib      // 编译的Qt6连接MYSQL的dll文件，如果使用MSVC并且MYSQL安装默认C盘以及版本和我一致可以直接放在生成的exe同级目录下
 --chat_server       // MYSQL 数据库脚本与配置
 --README.md
@@ -31,8 +30,8 @@
 
 | 模块 | 技术 |
 |---|---|
-| 服务端 | C++ / Qt 网络库 [按实际修改] |
-| Python 客户端 | Python / Qt(如 PyQt) [按实际修改] |
+| 服务端 | C++ / Qt 网络库 |
+| Python 客户端 | Python / Qt |
 | 数据库 | MySQL |
 | 通信 | TCP + JSON(4 字节长度头 + JSON 报文) |
 
@@ -51,7 +50,7 @@
 ## 快速开始
 
 ### 环境要求
-- CMake ≥ 3.21、C++11 及以上编译器 [按实际修改]
+- CMake ≥ 3.21、C++11 及以上编译器
 - Qt MSVC固件包(需要修改CMakeLists.txt中路径)
 - MySQL  8.0.42
 - Python的pyqt6
