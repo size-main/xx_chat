@@ -25,7 +25,7 @@ public:
     Server(QObject* parent = nullptr);
 public:
     /* 初始化连接API */
-    void lisen_ipconfig(const QHostAddress& address = QHostAddress::Any, quint16 port = 8888);
+    void lisen_ipconfig(const QHostAddress& address = QHostAddress::Any, quint16 port = 8088);
     bool initMysqlConnect(void);
 private:
     void onNewConnection(void);
@@ -41,6 +41,8 @@ private:
     void sendJson(QTcpSocket* client, const QJsonObject& json);
     void setloadStatus(int id, bool status);
     bool is_userName_Status(QString userName);
+    QJsonArray loadFriend(QString data);
+    bool appnedFriend(QString userName, QString friendName);
 private:
     QTcpServer* server = nullptr;
     ClientInfo m_clients;

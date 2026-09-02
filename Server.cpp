@@ -9,7 +9,7 @@ Server::Server(QObject* parent)
 
 void Server::lisen_ipconfig(const QHostAddress& address, quint16 port)
 {
-    server->listen(QHostAddress::Any, 8888);
+    server->listen(address, 8888);
     connect(server, &QTcpServer::newConnection, this, &Server::onNewConnection);
 }
 
@@ -318,8 +318,25 @@ void Server::ReadyReadData_Slots_Handler(QTcpSocket* client)
             this->info.remove(userName);
             client->flush();
         }
-    } else if (type == "append friend") {
+    } else if (type == "loadfriend") {
+        QJsonArray data = this->loadFriend(dataJson["data"].toString());
+        QJsonObject sendJson;
 
+        sendJson["type"] = "loadfriend";
+        sendJson["data"] = data;
+
+        qDebug() << sendJson;
+        this->sendJson(client, sendJson);
+        client->flush();
+    } else if (type == "append friend") {
+        QString userName = dataJson["userName"].toString();
+        QString friendName = dataJson["friendName"].toString();
+        QJsonObject sendJson;
+
+        sendJson["type"] = "append friend";
+        sendJson["status"] = this->appnedFriend(userName, friendName);
+        sendJson["data"] = sendJson["status"].toBool() ? "添加成功" : "添加失败";
+        this->sendJson(client, sendJson);
     }
 }
 
@@ -346,18 +363,20 @@ bool Server::deleteUser_as_registrationUser(QString userName, QString password, 
     QSqlQuery query;
     if (flag)
     {
-        /* 插入语句 */
         query.prepare("INSERT INTO users(account, password) VALUES (:userName, :password);");
         query.bindValue(":userName", userName);
         query.bindValue(":password", password);
     } else {
-        /* 删除账号 */
+        query.prepare("DELETE FROM users WHERE account = :userName;");
+        query.bindValue(":userName", userName);
     }
+
     if (!query.exec())
     {
-        qDebug() << "删除/添加账号失败" << Qt::endl;
+        qDebug() << "操作失败：" << query.lastError().text();
         return false;
     }
+    qDebug() << "操作成功";
     return true;
 }
 
@@ -384,7 +403,7 @@ bool Server::is_userName_Status(QString userName)
 {
     QSqlQuery query;
     
-    query.prepare("SELECT EXISTS(SELECT 1 FROM users WHERE account=:userName)");
+    query.prepare("SELECT * FROM users WHERE account=:userName;");
     query.bindValue(":userName", userName);
 
     if (!query.exec())
@@ -396,5 +415,44 @@ bool Server::is_userName_Status(QString userName)
         return query.value(0).toBool();
     }
 
-    return false;
+    return true;
+}
+
+QJsonArray Server::loadFriend(QString data)
+{
+    QSqlQuery query;
+    QString friendName = data;
+
+    friendName = "%" + friendName + "%";
+    query.prepare("SELECT * FROM users WHERE account LIKE :friendName;");
+    query.bindValue(":friendName", friendName);
+
+    if (!query.exec())
+    {
+        return QJsonArray();
+    }
+    QJsonArray Arraydata;
+    while (query.next())
+    {
+        Arraydata.append(query.value("account").toString());
+    }
+
+    return Arraydata;
+}
+
+bool Server::appnedFriend(QString userName, QString friendName)
+{
+    QSqlQuery query;
+
+    query.prepare(R"(INSERT INTO friends (user_id, friend_id, created_at) 
+                    VALUES(:user_id, :friend_id, NOW()), (:friend_id, :user_id, NOW());)");
+    query.bindValue(":user_id", this->getId(userName));
+    query.bindValue(":friend_id", this->getId(friendName));
+
+    if (!query.exec())
+    {
+        return false;
+    }
+
+    return true;
 }
