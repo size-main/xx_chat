@@ -39,6 +39,7 @@ class LoadingSpinner(QWidget):
 
 class MainWindow(QMainWindow):
 	chatRequested = pyqtSignal(str)
+	loadFriendListRequested = pyqtSignal(str)
 	addFriendRequested = pyqtSignal(str)
 
 	def __init__(self, friend_list = None):
@@ -154,13 +155,17 @@ class MainWindow(QMainWindow):
 		layout.addWidget(QLabel("搜索结果", objectName="sectionTitle"))
 		self.result_frame = QFrame(objectName="resultFrame")
 		result_layout = QHBoxLayout(self.result_frame)
-		self.result_label = QLabel("输入关键词搜索本地好友")
+		self.result_label = QLabel("输入关键词搜索用户")
 		result_layout.addWidget(self.result_label, 1)
 		self.add_result_button = QPushButton("添加", objectName="secondaryButton")
 		self.add_result_button.hide()
 		self.add_result_button.clicked.connect(self._request_add_friend)
 		result_layout.addWidget(self.add_result_button)
 		layout.addWidget(self.result_frame)
+		self.result_list = QListWidget()
+		self.result_list.hide()
+		self.result_list.itemClicked.connect(self._select_result_friend)
+		layout.addWidget(self.result_list)
 		layout.addStretch()
 		return page
 
@@ -190,22 +195,41 @@ class MainWindow(QMainWindow):
 		self.add_button.setChecked(page_index == 1)
 
 	def _search_friend(self):
-		# keyword = self.add_search.text().strip().lower()
-		# if not keyword:
-		# 	self.result_label.setText("请输入好友昵称或账号")
-		# 	self.add_result_button.hide()
-		# 	return
-		# matches = [friend for friend in self._friends if keyword in friend.lower()]
-		# if matches:
-		# 	self._pending_friend = matches[0]
-		# 	self.result_label.setText("●  " + self._pending_friend)
-		# 	self.add_result_button.show()
-		# else:
-		# 	self._pending_friend = ""
-		# 	self.result_label.setText("没有找到匹配的好友")
-		# 	self.add_result_button.hide()
-		pass
-	
+		keyword = self.add_search.text().strip().lower()
+		if not keyword:
+			self.result_label.setText("请输入好友昵称或账号")
+			self.add_result_button.hide()
+			return
+		self.loadFriendListRequested.emit(keyword)	
+
+	def _select_result_friend(self, item):
+		if item is None:
+			return
+		self._pending_friend = item.data(Qt.ItemDataRole.UserRole)
+		self.result_label.setText("●  " + self._pending_friend)
+		self.add_result_button.show()
+
+	def load_friend_search_result(self, firendNameList: list):
+		friends = [str(name).strip() for name in firendNameList if str(name).strip()]
+		self.result_list.clear()
+		self.result_list.hide()
+		self.add_result_button.hide()
+		self._pending_friend = ""
+		if not friends:
+			self.result_label.setText("未找到好友")
+			return
+
+		for friend in friends:
+			item = QListWidgetItem("●  " + friend)
+			item.setData(Qt.ItemDataRole.UserRole, friend)
+			self.result_list.addItem(item)
+
+		self.result_list.show()
+		self.result_label.setText("请选择要添加的好友")
+		if self.result_list.count() > 0:
+			self.result_list.setCurrentRow(0)
+			self._select_result_friend(self.result_list.currentItem())
+
 	def _request_add_friend(self):
 		if not self._pending_friend:
 			return
@@ -225,10 +249,12 @@ class MainWindow(QMainWindow):
 		self._add_timer.stop()
 		self.add_result_button.setEnabled(True)
 		if found:
-			self.result_label.setText("已找到好友：" + self._pending_friend)
+			result_text = str(message).strip() if str(message).strip() else "已发送好友申请：" + self._pending_friend
+			self.result_label.setText(result_text)
 			self.add_result_button.hide()
+			self.result_list.hide()
 		else:
-			self.result_label.setText(str(message))
+			self.result_label.setText(str(message) if str(message).strip() else "添加好友失败")
 
 
 if __name__ == "__main__":

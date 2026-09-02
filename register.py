@@ -106,9 +106,27 @@ class RegisterWindow(QMainWindow):
         self.back_button.clicked.connect(self._back_to_login)
         body_layout.addWidget(self.back_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
+    def reset_state(self):
+        self._waiting_for_result = False
+        self._spinner_timer.stop()
+        self._timeout_timer.stop()
+        self._spinner_index = 0
+        self.username_edit.clear()
+        self.password_edit.clear()
+        self.confirm_edit.clear()
+        self.agreement.setChecked(False)
+        self.register_button.setEnabled(True)
+        self.back_button.setEnabled(True)
+        self.status_label.clear()
+        self.status_label.setStyleSheet("")
+
     def _back_to_login(self):
         self.getloadingWindowRequested.emit()
         self.close()
+
+    def closeEvent(self, event):
+        self.reset_state()
+        super().closeEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -160,10 +178,7 @@ class RegisterWindow(QMainWindow):
     def _on_timeout(self):
         if not self._waiting_for_result:
             return
-        self._waiting_for_result = False
-        self._spinner_timer.stop()
-        self.register_button.setEnabled(True)
-        self.back_button.setEnabled(True)
+        self.reset_state()
         self.status_label.setStyleSheet("color: #d9534f;")
         self.status_label.setText("服务器超时，注册失败")
 
@@ -173,14 +188,14 @@ class RegisterWindow(QMainWindow):
         self._waiting_for_result = False
         self._spinner_timer.stop()
         self._timeout_timer.stop()
-        self.register_button.setEnabled(True)
-        self.back_button.setEnabled(True)
         if success:
+            self.reset_state()
             QMessageBox.information(self, "提示", "注册成功")
             self.close()
             self.parent().show()
             self.parent().raise_()
             self.parent().activateWindow()
             return
+        self.reset_state()
         self.status_label.setStyleSheet("color: #d9534f;")
         self.status_label.setText(str(message) or "注册失败")

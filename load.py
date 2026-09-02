@@ -18,7 +18,7 @@ class load(QMainWindow):
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.ShowPass = QToolButton(self.ui.passworldlineEdit)
         self.register_window = RegisterWindow(self)
-        self.register_window.registerRequested.connect(self.registerSignal)
+        self.register_window.registerRequested.connect(lambda userName, password: self.registerSignal.emit(userName, password))
         self.register_window.getloadingWindowRequested.connect(lambda: self.show())
         self.initLoadWindow()
         self.ui.passworldlineEdit.setEchoMode(QLineEdit.EchoMode.Password)

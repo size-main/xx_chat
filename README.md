@@ -1,3 +1,1 @@
-# xx_chat
-
-python客户端代码
+### 这是python客户端
