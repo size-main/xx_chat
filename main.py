@@ -16,7 +16,7 @@ class MainCode(QObject):
         self.cnt = 0
         self.friendId = []
         self.friendList = list()
-        self.client = Client("127.0.0.1", 8088)
+        self.client = Client("bc0sd7tr.beesnat.com", 12436)
         self.history = HistoryWorker()
         self.clientThread = QThread()
         self.load = load()
@@ -38,6 +38,7 @@ class MainCode(QObject):
         self.client.loadFriendListRequested.connect(self.MainWindow.load_friend_search_result)
         self.MainWindow.addFriendRequested.connect(lambda friendName: self.client.send_append_friend_request(self.userName, friendName))
         self.client.appendFriendChanged.connect(self.__handle_append_friend_result__)
+        self.client.loadAppendFriendChanged.connect(self.__load_append_friend_result__)
 
     def __refresh_friend_list__(self):
         if not self.userName:
@@ -47,10 +48,15 @@ class MainCode(QObject):
         self.cnt = 0
         self.client.getFriend_load(self.userName)
 
-    def __handle_append_friend_result__(self, success: bool, message: str):
+    def __load_append_friend_result__(self, friendName: str):
+        self.friendList.append(friendName)
+        self.MainWindow.set_friend_list(self.friendList)
+
+    def __handle_append_friend_result__(self, success: bool, message: str, friendName: str):
         self.MainWindow.handle_add_friend_result(success, message)
         if success:
-            self.__refresh_friend_list__()
+            self.friendList.append(friendName)
+            self.MainWindow.set_friend_list(self.friendList)
 
     def __send_msg_event_handler__(self, friendName: str, msg: str):
         self.client.send_message(self.userName, friendName, msg)
