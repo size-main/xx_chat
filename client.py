@@ -11,7 +11,8 @@ class Client(QObject):
     friendReadChanged = pyqtSignal(str)
     loadFriendListRequested = pyqtSignal(list)
     registrationChanged = pyqtSignal(bool, str)
-    appendFriendChanged = pyqtSignal(bool, str)
+    appendFriendChanged = pyqtSignal(bool, str, str)
+    loadAppendFriendChanged = pyqtSignal(str)
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8888):
         super().__init__()
@@ -121,4 +122,6 @@ class Client(QObject):
             elif message_type == "loadfriend":
                 self.loadFriendListRequested.emit(json_data["data"])
             elif message_type == "append friend":
-                self.appendFriendChanged.emit(json_data["status"], json_data["data"])
+                self.appendFriendChanged.emit(json_data["status"], json_data["data"], json_data["friendName"])
+            elif message_type == "add friend":
+                self.loadAppendFriendChanged.emit(json_data["friendName"])
