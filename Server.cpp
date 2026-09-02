@@ -330,13 +330,25 @@ void Server::ReadyReadData_Slots_Handler(QTcpSocket* client)
         client->flush();
     } else if (type == "append friend") {
         QString userName = dataJson["userName"].toString();
-        QString friendName = dataJson["friendName"].toString();
-        QJsonObject sendJson;
-
-        sendJson["type"] = "append friend";
-        sendJson["status"] = this->appnedFriend(userName, friendName);
-        sendJson["data"] = sendJson["status"].toBool() ? "添加成功" : "添加失败";
-        this->sendJson(client, sendJson);
+         QString friendName = dataJson["friendName"].toString();
+         QJsonObject sendJson;
+        
+         sendJson["type"] = "append friend";
+         sendJson["status"] = this->appnedFriend(userName, friendName);
+         sendJson["friendName"] = friendName;
+         sendJson["data"] = sendJson["status"].toBool() ? "添加成功" : "添加失败";
+         this->sendJson(client, sendJson);
+         if (sendJson["status"].toBool())
+         {
+             if (this->m_clients.contains(userName))
+             {
+                 QTcpSocket* socket = this->m_clients[friendName].first;
+                 sendJson["friendName"] = userName;
+                 sendJson["type"] = "add friend";
+                 this->sendJson(socket, sendJson);
+                 socket->flush();
+             }
+         }
     }
 }
 
