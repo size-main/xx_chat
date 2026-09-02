@@ -16,7 +16,7 @@ class MainCode(QObject):
         self.cnt = 0
         self.friendId = []
         self.friendList = list()
-        self.client = Client("bc0sd7tr.beesnat.com", 12436)
+        self.client = Client("127.0.0.1", 8088)
         self.history = HistoryWorker()
         self.clientThread = QThread()
         self.load = load()
