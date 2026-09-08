@@ -21,6 +21,7 @@ public:
     void setusersStatus(QString userName, bool status);
     QJsonArray loadFriend(QString data);
     bool appnedFriend(QString userName, QString friendName);
+    bool deleteFriend(QString userName, QString friendName);
 private:
     QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL");
 };

@@ -34,6 +34,8 @@ private:
     void loadend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
     void loadfriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
     void appendFriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void deleteFriend_type_hanlder(QTcpSocket*& client, QJsonObject& jsonObj);
+    void file_type_handler(QTcpSocket*& client, QJsonObject& json);
 private:
     void sendJson(QTcpSocket* client, const QJsonObject& json);
 private:
@@ -42,5 +44,6 @@ private:
     ClientInfo m_clients;
     ClinetInfotype online_Client;
     onlineInfo info;
+    QHash<QTcpSocket*, QByteArray> m_receiveBuffers;
     type_function_Info type_thread_handler;
 };

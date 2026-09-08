@@ -195,7 +195,7 @@ bool DatabaseManager::appnedFriend(QString userName, QString friendName)
         FROM users u1
         JOIN users u2
         CROSS JOIN (SELECT NOW() AS ts) t
-        WHERE u1.account = :a1 AND u2.account = :a2
+        WHERE u1.account = :userName AND u2.account = :friendName
         AND NOT EXISTS (
             SELECT 1 FROM friends f WHERE f.user_id = u1.id AND f.friend_id = u2.id
         )
@@ -206,7 +206,7 @@ bool DatabaseManager::appnedFriend(QString userName, QString friendName)
         FROM users u1
         JOIN users u2
         CROSS JOIN (SELECT NOW() AS ts) t
-        WHERE u1.account = :a1 AND u2.account = :a2
+        WHERE u1.account = :userName AND u2.account = :friendName
         AND NOT EXISTS (
             SELECT 1 FROM friends f WHERE f.user_id = u2.id AND f.friend_id = u1.id
         );
@@ -219,5 +219,32 @@ bool DatabaseManager::appnedFriend(QString userName, QString friendName)
         return false;
     }
 
+    return true;
+}
+
+bool DatabaseManager::deleteFriend(QString userName, QString friendName)
+{
+    QSqlQuery query;
+
+    query.prepare(R"(
+        DELETE f
+        FROM friends f
+        JOIN users u1, users u2
+        WHERE
+            (
+                (f.user_id = u1.id AND f.friend_id = u2.id)
+                OR
+                (f.user_id = u2.id AND f.friend_id = u1.id)
+            )
+        AND u1.account = :userName
+        AND u2.account = :friendName;
+    )");
+    query.bindValue(":userName", userName);
+    query.bindValue(":friendName", friendName);
+
+    if (!query.exec())
+    {
+        return false;
+    }
     return true;
 }

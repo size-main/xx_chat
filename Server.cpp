@@ -42,50 +42,65 @@ void Server::disConnection(void)
 void Server::ReadyRead_Thread(void)
 {
     QTcpSocket* client = qobject_cast<QTcpSocket*>(sender());
-    if(!client) return;
-    QByteArray data = client->readAll();
-
-    if(data.size() < 8)
-    return;
-
-    int totalSize = data.size();
-    uint16_t header = (static_cast<uint8_t>(data[0]) << 8) | static_cast<uint8_t>(data[1]);
-    uint8_t tailHigh = static_cast<uint8_t>(data[totalSize - 2]);
-    uint8_t tailLow  = static_cast<uint8_t>(data[totalSize - 1]);
-    uint16_t tail = (tailHigh << 8) | tailLow;
-
-    data.remove(0,2);
-    data.chop(2);
-
-    if(data.size() <4) return;
-    QByteArray lenBuf = data.first(4);
-    uint32_t bodyLength = (static_cast<uint8_t>(lenBuf[0]) << 24) | (static_cast<uint8_t>(lenBuf[1]) << 16) |
-                          (static_cast<uint8_t>(lenBuf[2]) << 8) | (static_cast<uint8_t>(lenBuf[3]));
-    data.remove(0,4); 
-
-    if (header != 0XA1A2 && tail != 0XB1B2 && bodyLength != data.size())
+    if (!client)
     {
-        qDebug() << "data is not";
         return;
     }
 
-    QJsonDocument dataJson = QJsonDocument::fromJson(data);
+    QByteArray& buffer = this->m_receiveBuffers[client];
+    buffer.append(client->readAll());
 
-    if (dataJson.isEmpty())
+    while (buffer.size() >= 8)
     {
-        qDebug() << "data is empty";
-        return;
-    }
-    QJsonObject jsonObj = dataJson.object();
-    QString type = jsonObj["type"].toString();
+        uint16_t header = (static_cast<uint8_t>(buffer[0]) << 8) | static_cast<uint8_t>(buffer[1]);
 
-    if (type_thread_handler.contains(type))
-    {
-        auto func_type_handler = type_thread_handler[type];
-        func_type_handler(client, jsonObj);
-    } else {
-        qDebug() << "type" << type << "error" << Qt::endl;
-    }
+        if (header != 0xA1A2)
+        {
+            buffer.remove(0, 1);
+            continue;
+        }
+
+        uint32_t bodyLength = (static_cast<uint8_t>(buffer[2]) << 24) | (static_cast<uint8_t>(buffer[3]) << 16) | 
+                              (static_cast<uint8_t>(buffer[4]) << 8) | static_cast<uint8_t>(buffer[5]);
+
+        const int packetSize = 2 + 4 + bodyLength + 2;
+
+        if (buffer.size() < packetSize)
+        {
+            return;
+        }
+
+        uint16_t tail = (static_cast<uint8_t>(buffer[packetSize - 2]) << 8) | static_cast<uint8_t>(buffer[packetSize - 1]);
+
+        if (tail != 0xB1B2)
+        {
+            buffer.remove(0, 1);
+            continue;
+        }
+
+        QByteArray body = buffer.mid(6, bodyLength);
+        buffer.remove(0, packetSize);
+
+        QJsonParseError error;
+        QJsonDocument dataJson =
+            QJsonDocument::fromJson(body, &error);
+
+        if (error.error != QJsonParseError::NoError || !dataJson.isObject())
+        {
+            qDebug() << "JSON parse error:" << error.errorString();
+            continue;
+        }
+
+        QJsonObject jsonObj = dataJson.object();
+        QString type = jsonObj["type"].toString();
+
+        if (type_thread_handler.contains(type))
+        {
+            type_thread_handler[type](client, jsonObj);
+        } else {
+            qDebug() << "type" << type << "error";
+        }
+    } 
 }
 
 void Server::init_type_hash(void)
@@ -98,6 +113,8 @@ void Server::init_type_hash(void)
     this->type_thread_handler["loadfriend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->loadfriend_type_handler(client, json); };
     this->type_thread_handler["append friend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->appendFriend_type_handler(client, json); };
     this->type_thread_handler["registration"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->registration_type_handler(client, json); };
+    this->type_thread_handler["delete friend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->deleteFriend_type_hanlder(client, json); };
+    this->type_thread_handler["file"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->file_type_handler(client, json); };
 }
 
 void Server::load_type_handler(QTcpSocket*& client, QJsonObject& json)
@@ -266,6 +283,56 @@ void Server::appendFriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj
             sendJson["type"] = "add friend";
             this->sendJson(socket, sendJson);
             socket->flush();
+        }
+    }
+}
+
+void Server::deleteFriend_type_hanlder(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    QString userName = jsonObj["userName"].toString();
+    QString friendName = jsonObj["friendName"].toString();
+
+    if (this->db.deleteFriend(userName, friendName))
+    {
+        if (this->m_clients.contains(friendName))
+        {
+            QJsonObject data;
+
+            data["type"] = "delete friend";
+            data["friendName"] = userName;
+            this->sendJson(this->m_clients[friendName].first, data);
+        }
+    }
+}
+
+void Server::file_type_handler(QTcpSocket*& client, QJsonObject& json)
+{
+    QJsonObject data;
+    QString userName = json["friendName"].toString();
+
+    data["type"] = "file";
+    data["friendName"] = json["userName"].toString();
+    data["fileName"] = json["fileName"].toString();
+    data["fileData"] = json["fileData"];
+    if (this->m_clients.contains(userName))
+    {
+        /* 好友在线就直接发送 */
+        QTcpSocket* socket = this->m_clients.value(userName).first;
+        this->sendJson(socket, data);
+        socket->flush();
+    } else {
+        /* 证明不在线, 保留数据缓存等下上线再发送 */
+        QString name = json["friendName"].toString();
+
+        if (!this->info.contains(name))
+        {
+            /* 没存在过离线消息, 新建链表串连消息 */
+            QList<QJsonObject> list;
+            list.append(data);
+            this->info.insert(name, list);
+        } else {
+            /* 存在离线消息, 直接在链表上添加元素 */
+            this->info.value(name).toList().append(data);
         }
     }
 }
