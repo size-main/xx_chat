@@ -16,6 +16,16 @@ msg_window_style = """
         font-weight: 700;
     }
 
+    QLabel#onlineStatus {
+        color: #8b96a8;
+        font-size: 13px;
+        padding-top: 4px;
+    }
+
+    QLabel#onlineStatus[online="true"] {
+        color: #258a55;
+    }
+
     QTextEdit {
         background: #ffffff;
         border: 1px solid #e3dced;
@@ -237,7 +247,6 @@ class loadWindow(Enum):
             color: #333333; 
             font-size: 14px; 
             font-family: \"Microsoft YaHei\", sans-serif; 
-            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
             min-height: 32px;
         } 
     """

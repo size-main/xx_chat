@@ -1,11 +1,11 @@
 from pathlib import Path
 import style
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QPainter, QPen, QCloseEvent
 from PyQt6.QtWidgets import (
 	QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
 	QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QStackedWidget,
-	QVBoxLayout, QWidget
+	QVBoxLayout, QWidget, QMenu
 )
 
 class LoadingSpinner(QWidget):
@@ -41,14 +41,18 @@ class MainWindow(QMainWindow):
 	chatRequested = pyqtSignal(str)
 	loadFriendListRequested = pyqtSignal(str)
 	addFriendRequested = pyqtSignal(str)
+	deleteFriendRequested = pyqtSignal(str)
 
 	def __init__(self, friend_list = None):
 		super().__init__()
 		self._friends = []
+		self._friend_online_status = {}
+		self._chat_previews = {}
+		self._chat_unread = set()
 		self._pending_friend = ""
 		self._add_timer = QTimer(self)
 		self._add_timer.setSingleShot(True)
-		self._add_timer.setInterval(2000)
+		self._add_timer.setInterval(4000)
 		self._add_timer.timeout.connect(self._handle_add_timeout)
 		self.setWindowTitle("联系人")
 		self.setMinimumSize(840, 560)
@@ -136,6 +140,8 @@ class MainWindow(QMainWindow):
 		layout.addWidget(self.friend_search)
 		self.friend_list = QListWidget()
 		self.friend_list.itemClicked.connect(self._friend_clicked)
+		self.friend_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+		self.friend_list.customContextMenuRequested.connect(self._show_friend_context_menu)
 		layout.addWidget(self.friend_list)
 		return page
 
@@ -170,24 +176,100 @@ class MainWindow(QMainWindow):
 		return page
 
 	def set_friend_list(self, friends):
-		self._friends = [str(friend) for friend in friends if str(friend).strip()]
+		self._friends = [self._text_value(friend) for friend in friends]
+		self._friends = [friend for friend in self._friends if friend]
 		self._filter_friends(self.friend_search.text())
 		self.count_label.setText("%d 位联系人" % len(self._friends))
 		if self._loading_overlay is not None:
 			self._loading_overlay.deleteLater()
 			self._loading_overlay = None
 
+	def remove_friend(self, friend_name):
+		friend_name = self._text_value(friend_name)
+		if not friend_name:
+			return
+		self._friends = [friend for friend in self._friends if friend != friend_name]
+		self._friend_online_status.pop(friend_name, None)
+		self._chat_previews.pop(friend_name, None)
+		self._chat_unread.discard(friend_name)
+		self._filter_friends(self.friend_search.text())
+		self.count_label.setText("%d 位联系人" % len(self._friends))
+
+	def set_friend_online(self, friend_name, is_online):
+		friend_name = str(friend_name).strip()
+		if not friend_name:
+			return
+		self._friend_online_status[friend_name] = bool(is_online)
+		self._filter_friends(self.friend_search.text())
+
+	def update_chat_preview(self, friend_name, message, unread=True):
+		friend_name = self._text_value(friend_name)
+		if not friend_name:
+			return
+		self._chat_previews[friend_name] = self._text_value(message).replace("\n", " ")
+		if unread:
+			self._chat_unread.add(friend_name)
+		else:
+			self._chat_unread.discard(friend_name)
+		self._filter_friends(self.friend_search.text())
+
+	@staticmethod
+	def _text_value(value):
+		if isinstance(value, bytes):
+			return value.decode("utf-8", errors="replace").strip()
+		return str(value or "").strip()
+
 	def _filter_friends(self, text):
 		keyword = text.strip().lower()
 		self.friend_list.clear()
 		for friend in self._friends:
 			if keyword in friend.lower():
-				item = QListWidgetItem("●  " + friend)
+				is_online = self._friend_online_status.get(friend, False)
+				item = QListWidgetItem()
 				item.setData(Qt.ItemDataRole.UserRole, friend)
+				item.setData(Qt.ItemDataRole.UserRole + 1, is_online)
 				self.friend_list.addItem(item)
+				row = QWidget()
+				row_layout = QVBoxLayout(row)
+				row_layout.setContentsMargins(0, 0, 0, 0)
+				row_layout.setSpacing(2)
+				title_layout = QHBoxLayout()
+				title_layout.setContentsMargins(0, 0, 0, 0)
+				name_label = QLabel(friend)
+				name_label.setStyleSheet("font-weight: 600;")
+				title_layout.addWidget(name_label)
+				title_layout.addStretch()
+				if friend in self._chat_unread:
+					unread_label = QLabel("●")
+					unread_label.setStyleSheet("color: #e5484d; font-size: 14px;")
+					title_layout.addWidget(unread_label)
+				row_layout.addLayout(title_layout)
+				preview = self._chat_previews.get(friend, "")
+				preview_label = QLabel(preview)
+				preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+				preview_label.setStyleSheet("color: #8b96a8; font-size: 12px;")
+				preview_label.setMaximumHeight(20)
+				row_layout.addWidget(preview_label)
+				item.setSizeHint(row.sizeHint().expandedTo(row.minimumSizeHint()))
+				item.setSizeHint(item.sizeHint().expandedTo(QSize(0, 52)))
+				self.friend_list.setItemWidget(item, row)
 
 	def _friend_clicked(self, item):
-		self.chatRequested.emit(item.data(Qt.ItemDataRole.UserRole))
+		friend_name = item.data(Qt.ItemDataRole.UserRole)
+		self._chat_unread.discard(friend_name)
+		self._filter_friends(self.friend_search.text())
+		self.chatRequested.emit(friend_name)
+
+	def _show_friend_context_menu(self, position):
+		item = self.friend_list.itemAt(position)
+		if item is None:
+			return
+		friend_name = item.data(Qt.ItemDataRole.UserRole)
+		menu = QMenu(self.friend_list)
+		delete_action = menu.addAction("删除好友")
+		if menu.exec(self.friend_list.mapToGlobal(position)) == delete_action:
+			self.remove_friend(friend_name)
+			self.deleteFriendRequested.emit(friend_name)
 
 	def _switch_page(self, page_index):
 		self.stack.setCurrentIndex(page_index)
@@ -264,4 +346,3 @@ if __name__ == "__main__":
 	window = MainWindow()
 	window.show()
 	sys.exit(app.exec())
-

@@ -26,6 +26,22 @@ class HistoryWorker(QObject):
             return None
         return self._user_path() / f"{friend_name}.json"
 
+    def latest_message(self, friend_account):
+        history_file = self._history_file(friend_account)
+        if history_file is None or not self.user_name or not history_file.exists():
+            return ""
+        try:
+            with history_file.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            return ""
+        if not isinstance(data, list):
+            return ""
+        for item in reversed(data):
+            if isinstance(item, dict) and str(item.get("message", "")).strip():
+                return str(item["message"]).strip()
+        return ""
+
     @pyqtSlot(str)
     def set_user_name(self, user_name):
         self.user_name = str(user_name or "").strip()
@@ -79,3 +95,44 @@ class HistoryWorker(QObject):
                 messages = []
         messages.append({"sender": str(sender), "message": str(message)})
         self.save_history(friend_account, messages)
+
+    def append_file(self, friend_account, sender, file_path):
+        history_file = self._history_file(friend_account)
+        if history_file is None or not self.user_name:
+            return
+        messages = []
+        if history_file.exists():
+            try:
+                with history_file.open("r", encoding="utf-8") as file:
+                    data = json.load(file)
+                messages = data if isinstance(data, list) else []
+            except (OSError, json.JSONDecodeError):
+                messages = []
+        messages.append({
+            "sender": str(sender),
+            "message": str(file_path),
+            "type": "file",
+        })
+        self.save_history(friend_account, messages)
+
+    def save_received_file(self, friend_account, file_name, file_data):
+        history_file = self._history_file(friend_account)
+        if history_file is None or not self.user_name:
+            return ""
+        safe_name = Path(str(file_name).strip()).name
+        if not safe_name or safe_name in (".", ".."):
+            safe_name = "received_file"
+        file_path = history_file.parent / safe_name
+        suffix = file_path.suffix
+        stem = file_path.stem
+        counter = 1
+        while file_path.exists():
+            file_path = history_file.parent / f"{stem}_{counter}{suffix}"
+            counter += 1
+        try:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(bytes(file_data))
+        except OSError as error:
+            self.historyError.emit(f"保存文件失败: {error}")
+            return ""
+        return str(file_path)

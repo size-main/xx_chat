@@ -1,12 +1,17 @@
 import sys
+import base64
+import binascii
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtNetwork import QTcpSocket
 from PyQt6.QtWidgets import QMessageBox
 import json
 import struct
+from pathlib import Path
 
 class Client(QObject):
     messageReceived = pyqtSignal(str, str)
+    fileReceived = pyqtSignal(str, str, bytes)
+    fileSendProgress = pyqtSignal(int)
     loadStatusChanged = pyqtSignal(bool)
     friendIdReadyChanged = pyqtSignal(list)
     friendReadChanged = pyqtSignal(str)
@@ -15,6 +20,7 @@ class Client(QObject):
     appendFriendChanged = pyqtSignal(bool, str, str)
     loadAppendFriendChanged = pyqtSignal(str)
     friend_lost_connection = pyqtSignal(str, bool)
+    delete_friend_lostChanged = pyqtSignal(str)
 
     HEAD_MARK = 0xA1A2
     TAIL_MARK = 0xB1B2
@@ -34,13 +40,37 @@ class Client(QObject):
             "friendIds": lambda json_data: self.friendIdReadyChanged.emit(json_data.get("data", [])),
             "friend": lambda json_data: self.friendReadChanged.emit(json_data.get("data", "")),
             "msg": lambda json_data: self.messageReceived.emit(json_data.get("friendName", ""), json_data.get("data", "")),
+            "file": self._handle_file_event,
+            "fileMessage": self._handle_file_event,
             "registration": lambda json_data: self.registrationChanged.emit(json_data["data"], json_data["error"]),
             "loadfriend": lambda json_data: self.loadFriendListRequested.emit(json_data["data"]),
             "append friend": lambda json_data: self.appendFriendChanged.emit(json_data["status"], json_data["data"], json_data["friendName"]),
             "add friend": lambda json_data: self.loadAppendFriendChanged.emit(json_data["friendName"]),
             "lost connection": lambda json_data: self.friend_lost_connection.emit(json_data["friendName"], False),
-            "online": lambda json_data: self.friend_lost_connection.emit(json_data["friendName"], True)
+            "online": lambda json_data: self.friend_lost_connection.emit(json_data["friendName"], True),
+            "delete friend": self._handle_delete_friend_event,
+            "deleteFriend": self._handle_delete_friend_event,
+            "delete": self._handle_delete_friend_event
         }
+
+    def _handle_delete_friend_event(self, json_data):
+        friend_name = json_data.get("friendName", json_data.get("data", ""))
+        self.delete_friend_lostChanged.emit(str(friend_name).strip())
+
+    def _handle_file_event(self, json_data):
+        friend_name = str(json_data.get("friendName", "")).strip()
+        file_name = json_data.get("fileName", json_data.get("filename", json_data.get("name", "")))
+        encoded_data = json_data.get("fileData", json_data.get("content", json_data.get("data", "")))
+        if isinstance(encoded_data, dict):
+            file_name = encoded_data.get("fileName", file_name)
+            encoded_data = encoded_data.get("data", encoded_data.get("content", ""))
+        if not friend_name or not file_name or not isinstance(encoded_data, str):
+            return
+        try:
+            file_data = base64.b64decode(encoded_data, validate=True)
+        except (ValueError, binascii.Error):
+            return
+        self.fileReceived.emit(friend_name, str(file_name), file_data)
 
     def __self_sender_msg__(self, msg: str):
         body = msg.encode("utf-8")
@@ -101,6 +131,33 @@ class Client(QObject):
         }
         self.__self_sender_msg__(json.dumps(data))
 
+    def send_file(self, userName: str, friendName: str, file_path: str):
+        try:
+            with Path(file_path).open("rb") as file:
+                file_data = base64.b64encode(file.read()).decode("ascii")
+        except OSError:
+            return False
+        data = {
+            "type": "file",
+            "userName": userName,
+            "friendName": friendName,
+            "fileName": file_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1],
+            "fileData": file_data
+        }
+        body = json.dumps(data).encode("utf-8")
+        packet = struct.pack(">H I", self.HEAD_MARK, len(body)) + body
+        packet += struct.pack(">H", self.TAIL_MARK)
+        total_size = len(packet)
+        sent_size = 0
+        chunk_size = 64 * 1024
+        while sent_size < total_size:
+            end = min(sent_size + chunk_size, total_size)
+            self.socket.write(packet[sent_size:end])
+            sent_size = end
+            self.fileSendProgress.emit(int(sent_size * 100 / total_size))
+        self.socket.flush()
+        return True
+
     def send_load_friend_request(self, keyword: str):
         data = {
             "type": "loadfriend",
@@ -111,6 +168,14 @@ class Client(QObject):
     def send_append_friend_request(self, userName: str, friendName: str):
         data = {
             "type": "append friend",
+            "userName": userName,
+            "friendName": friendName
+        }
+        self.__self_sender_msg__(json.dumps(data))
+
+    def send_delete_friend_request(self, userName: str, friendName: str):
+        data = {
+            "type": "delete friend",
             "userName": userName,
             "friendName": friendName
         }

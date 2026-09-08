@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QPoint, QSize, QRect
-from PyQt6.QtWidgets import QMainWindow, QLineEdit, QToolButton, QHBoxLayout, QMessageBox
-from PyQt6.QtGui import QMouseEvent, QIcon, QPixmap, QRegion
+from PyQt6.QtWidgets import QMainWindow, QLineEdit, QToolButton, QHBoxLayout, QMessageBox, QStyle, QStyleOption, QGraphicsDropShadowEffect
+from PyQt6.QtGui import QMouseEvent, QIcon, QPixmap, QRegion, QPainter, QBitmap
 from PyQt6.QtCore import QObject
 from register import RegisterWindow
 import res
@@ -16,6 +16,10 @@ class load(QMainWindow):
         self.m_bDragging = False
         self.m_pointDragPos = QPoint()
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(12)
+        shadow.setColor(Qt.GlobalColor.gray)
+        shadow.setOffset(0, 0)
         self.ShowPass = QToolButton(self.ui.passworldlineEdit)
         self.register_window = RegisterWindow(self)
         self.register_window.registerRequested.connect(lambda userName, password: self.registerSignal.emit(userName, password))
@@ -28,6 +32,14 @@ class load(QMainWindow):
         self.ui.loading.clicked.connect(self.on_loading_clicked_handler)
         self.ui.toolButton.clicked.connect(self.on_toolButton_clicked_handler)
         self.ui.morebutton.clicked.connect(self.on_register_clicked)
+
+    def paintEvent(self, event):
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
+        super().paintEvent(event)
+        p.end()
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
