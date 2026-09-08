@@ -4,49 +4,43 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QHostAddress>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QSqlDatabase>
-#include <QSqlQuery>
 #include <QThread>
-#include <QList>
+#include <QJsonObject>
 #include <QHash>
-#include <QPair>
 #include <QDebug>
+#include "DatabaseManager.h"
 
-using ClientData = QPair<QTcpSocket*, QThread*>;            // 客户端数据
-using ClientInfo = QHash<QString, ClientData>;              // 客户端
-using onlineInfo = QHash<QString, QList<QJsonObject>>;      // 离线消息
+using ClientData = QPair<QTcpSocket*, QThread*>;                                                    // 客户端数据
+using ClientInfo = QHash<QString, ClientData>;                                                      // 客户端
+using ClinetInfotype = QHash<QTcpSocket*, QString>;                                                 // 反哈希
+using onlineInfo = QHash<QString, QList<QJsonObject>>;                                              // 离线消息
+using type_function_Info = QHash<QString, std::function<void (QTcpSocket*&, QJsonObject&)>>;        // 通过消息类型调用不同的回调函数
 
 class Server : public QObject {
     Q_OBJECT
 public:
     Server(QObject* parent = nullptr);
-public:
-    /* 初始化连接API */
-    void lisen_ipconfig(const QHostAddress& address = QHostAddress::Any, quint16 port = 8088);
-    bool initMysqlConnect(void);
 private:
     void onNewConnection(void);
-    QByteArray msgErrorSned(QString error);
-    bool loadEnable_as_Disable(QString userName, QString password);
-    bool is_friend(QString friendName, QString userName);
-    qint64 getId(QString name);
-    QString getUserName(int id);
-    QJsonArray getfriendList(int userId);
+    void disConnection(void);
+    void ReadyRead_Thread(void);
+    void init_type_hash(void);
 private:
-    void ReadyReadData_Slots_Handler(QTcpSocket* client);
-    bool deleteUser_as_registrationUser(QString userName, QString password, bool flag);
+    void load_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void msg_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void registration_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void loading_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void friend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void loadend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void loadfriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+    void appendFriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj);
+private:
     void sendJson(QTcpSocket* client, const QJsonObject& json);
-    void setloadStatus(int id, bool status);
-    bool is_userName_Status(QString userName);
-    QJsonArray loadFriend(QString data);
-    bool appnedFriend(QString userName, QString friendName);
 private:
+    DatabaseManager db;
     QTcpServer* server = nullptr;
     ClientInfo m_clients;
+    ClinetInfotype online_Client;
     onlineInfo info;
-    QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL");
-    bool is_mysql_connect = false;
+    type_function_Info type_thread_handler;
 };

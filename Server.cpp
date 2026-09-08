@@ -1,470 +1,289 @@
 #include "Server.h"
-#include <QSqlError>
+#include <QJsonDocument>
 
 Server::Server(QObject* parent)
     : QObject(parent)
 {
     server = new QTcpServer(this);
-}
-
-void Server::lisen_ipconfig(const QHostAddress& address, quint16 port)
-{
-    server->listen(address, 8888);
+    server->listen(QHostAddress::Any, 8888);
+    this->init_type_hash();
     connect(server, &QTcpServer::newConnection, this, &Server::onNewConnection);
-}
-
-bool Server::initMysqlConnect(void)
-{
-    this->db.setHostName("127.0.0.1");
-    this->db.setPort(3306);
-    this->db.setDatabaseName("chat_server");
-    this->db.setUserName("root");
-    this->db.setPassword("root");
-
-    return db.open();
 }
 
 void Server::onNewConnection(void)
 {
-    QTcpSocket* client = server->nextPendingConnection();
-    
+    QTcpSocket* client = this->server->nextPendingConnection();
+
     if (client)
     {
-        ClientInfo info;
-        QString clientIp = client->peerAddress().toString();
-        connect(client, &QTcpSocket::disconnected, [this, client]() {
-            for (auto it = this->m_clients.constBegin(); it != this->m_clients.constEnd(); ++it) 
-            {
-                ClientData itm = it.value();
-                if (itm.first == client)
-                {
-                    delete itm.second;
-                    this->m_clients.erase(it);
-                    break;
-                }
-            }
-            client->deleteLater();
-        });
-        connect(client, &QTcpSocket::readyRead, [this, client] () {
-            this->ReadyReadData_Slots_Handler(client);
-        });
+        connect(client, &QTcpSocket::disconnected, this, &Server::disConnection);
+        connect(client, &QTcpSocket::readyRead, this, &Server::ReadyRead_Thread);
+    } else {
+        qDebug() << "错误连接" << Qt::endl;
     }
 }
 
-QByteArray Server::msgErrorSned(QString error)
+void Server::disConnection(void)
 {
-    QJsonObject retJson;
-
-    retJson["type"] = "error";
-    retJson["msg"] = "json error";
-    QJsonDocument tempJson(retJson);
-
-    return tempJson.toJson();
+    QTcpSocket* client = qobject_cast<QTcpSocket*>(sender());
+    if(!client) return; 
+    if (this->online_Client.contains(client))
+    {
+        QString userName = this->online_Client[client];
+        auto obj = this->m_clients[userName];
+        delete obj.second;
+        this->db.setusersStatus(userName, false);
+        this->m_clients.remove(userName);
+        this->online_Client.remove(client);
+    }
+    client->deleteLater();
 }
 
-bool Server::loadEnable_as_Disable(QString userName, QString password)
+void Server::ReadyRead_Thread(void)
 {
-    if (userName.isEmpty() || password.isEmpty())
-    {
-        return false;
-    }
-    QSqlQuery query(this->db);
-    query.prepare(R"(
-        SELECT id, account
-        FROM users
-        WHERE account = :account
-        AND password = :password
-    )");
-    query.bindValue(":account", userName);
-    query.bindValue(":password", password);
-    if (!query.exec())
-    {
-        return false;
-    }
-    if (query.next())
-    {
-        int userId = query.value("id").toInt();
-        qDebug() << "登录成功:" << userId;
-
-        this->setloadStatus(userId, true);
-        return true;
-    }
-
-    return false;
-}
-
-bool Server::is_friend(QString friendName, QString userName)
-{
-    if (friendName.isEmpty() || userName.isEmpty())
-    {
-        return false;
-    }
-    quint64 friendId = this->getId(friendName);
-    quint64 userId = this->getId(userName);
-    QSqlQuery query;
-    query.prepare(
-        "SELECT friendId"
-    );
-    query.bindValue(":userId", userId);
-    query.bindValue(":friendId", friendId);
-    
-    if (!query.exec())
-    {
-        return false;
-    }
-    if (query.next())
-    {
-        return true;
-    }
-
-    return false;
-}
-
-qint64 Server::getId(QString name)
-{
-    QSqlQuery query(this->db);
-
-    query.prepare("SELECT id FROM users WHERE account = :account;");
-    query.bindValue(":account", name);
-    if (!query.exec())
-    {
-        return -1;
-    }
-    if (query.next())
-    {
-        const qint64 userId = query.value("id").toLongLong();
-        return userId;
-    }
-
-    return -1;
-}
-
-QString Server::getUserName(int id)
-{
-    if (id <= 0)
-    {
-        qDebug() << "id不合法" << Qt::endl;
-        return "";
-    }
-    QSqlQuery query;
-
-    query.prepare("SELECT account FROM users WHERE id = :user_id");
-    query.bindValue(":user_id", id);
-
-    if (!query.exec())
-    {
-        qDebug() << "查询失败";
-        return "";
-    }
-    if (query.next())
-    {
-        return query.value("account").toString();
-    }
-    return "";
-}
-
-QJsonArray Server::getfriendList(int userId)
-{
-    QSqlQuery query;
-    QJsonArray retList;
-
-    query.prepare(
-        "SELECT friend_id "
-        "FROM friends "
-        "WHERE user_id = :userId"
-    );
-
-    query.bindValue(":userId", userId);
-
-    if (!query.exec())
-    {
-        qDebug() << "查询好友失败:" << query.lastError().text();
-        return retList;
-    }
-
-    qDebug() << "查询到好友" << Qt::endl;
-
-    while (query.next())
-    {
-        retList.append(query.value("friend_id").toInt());
-    }
-
-    return retList;
-}
-
-void Server::ReadyReadData_Slots_Handler(QTcpSocket* client)
-{
+    QTcpSocket* client = qobject_cast<QTcpSocket*>(sender());
+    if(!client) return;
     QByteArray data = client->readAll();
+
+    if(data.size() < 8)
+    return;
+
+    int totalSize = data.size();
+    uint16_t header = (static_cast<uint8_t>(data[0]) << 8) | static_cast<uint8_t>(data[1]);
+    uint8_t tailHigh = static_cast<uint8_t>(data[totalSize - 2]);
+    uint8_t tailLow  = static_cast<uint8_t>(data[totalSize - 1]);
+    uint16_t tail = (tailHigh << 8) | tailLow;
+
+    data.remove(0,2);
+    data.chop(2);
+
+    if(data.size() <4) return;
+    QByteArray lenBuf = data.first(4);
+    uint32_t bodyLength = (static_cast<uint8_t>(lenBuf[0]) << 24) | (static_cast<uint8_t>(lenBuf[1]) << 16) |
+                          (static_cast<uint8_t>(lenBuf[2]) << 8) | (static_cast<uint8_t>(lenBuf[3]));
+    data.remove(0,4); 
+
+    if (header != 0XA1A2 && tail != 0XB1B2 && bodyLength != data.size())
+    {
+        qDebug() << "data is not";
+        return;
+    }
+
     QJsonDocument dataJson = QJsonDocument::fromJson(data);
 
     if (dataJson.isEmpty())
     {
-        client->write(this->msgErrorSned("json error"));
+        qDebug() << "data is empty";
         return;
     }
-
     QJsonObject jsonObj = dataJson.object();
     QString type = jsonObj["type"].toString();
 
-    if (type == "load")
+    if (type_thread_handler.contains(type))
     {
-        if (this->loadEnable_as_Disable(jsonObj["userName"].toString(), jsonObj["password"].toString()))
+        auto func_type_handler = type_thread_handler[type];
+        func_type_handler(client, jsonObj);
+    } else {
+        qDebug() << "type" << type << "error" << Qt::endl;
+    }
+}
+
+void Server::init_type_hash(void)
+{
+    this->type_thread_handler["load"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->load_type_handler(client, json); };
+    this->type_thread_handler["loading"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->loading_type_handler(client, json); };
+    this->type_thread_handler["msg"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->msg_type_handler(client, json); };
+    this->type_thread_handler["friend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->friend_type_handler(client, json); };
+    this->type_thread_handler["loadend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->loadend_type_handler(client, json); };
+    this->type_thread_handler["loadfriend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->loadfriend_type_handler(client, json); };
+    this->type_thread_handler["append friend"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->appendFriend_type_handler(client, json); };
+    this->type_thread_handler["registration"] = [this] (QTcpSocket*& client, QJsonObject& json) { this->registration_type_handler(client, json); };
+}
+
+void Server::load_type_handler(QTcpSocket*& client, QJsonObject& json)
+{
+    QString userName = json["userName"].toString();
+    QString password = json["password"].toString();
+    
+    if (db.load_userName(userName, password))
+    {
+        if (this->m_clients.contains(userName))
         {
-            if (this->m_clients.contains(jsonObj["userName"].toString()))
-            {
-                QJsonObject loadJson;
-
-                loadJson["type"] = "load";
-                loadJson["status"] = "id is online";
-
-                QJsonDocument sendJson(loadJson);
-
-                client->write(sendJson.toJson());
-                return;
-            }
             QJsonObject loadJson;
 
             loadJson["type"] = "load";
-            loadJson["status"] = "enable";
+            loadJson["status"] = "id is online";
 
-            this->sendJson(client, loadJson);
-            QThread* thread = new QThread();
-            auto infoData = qMakePair(client, thread);
-            client->moveToThread(thread);
-            this->m_clients.insert(jsonObj["userName"].toString(), infoData);
+            this->sendJson(client, loadJson);               // 不允许重复登录
+            return;
         }
-    } else if (type == "msg") {
-        QString friendName = jsonObj["friendName"].toString();
-        QString userName = jsonObj["userName"].toString();
-        QString msgData = jsonObj["data"].toString();
+        QJsonObject loadJson;
+
+        loadJson["type"] = "load";
+        loadJson["status"] = "enable";
+        this->sendJson(client, loadJson);
+
+        QThread* thread = new QThread();
+        auto infoData = qMakePair(client, thread);
+
+        client->moveToThread(thread);
+        this->m_clients.insert(userName, infoData);
+        this->db.setusersStatus(userName, true);
+    }
+}
+
+void Server::msg_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    QString friendName = jsonObj["friendName"].toString();
+    QString userName = jsonObj["userName"].toString();
+    QString msgData = jsonObj["data"].toString();
+    QJsonObject sendJson;
+
+    (void)client;
+
+    sendJson["type"] = "msg";
+    sendJson["friendName"] = userName;
+    sendJson["data"] = jsonObj["data"].toString();
+
+    if (this->m_clients.contains(friendName))
+    {
+        /* 好友在线就直接发送 */
+        QTcpSocket* socket = this->m_clients.value(friendName).first;
+        this->sendJson(socket, sendJson);
+        socket->flush();
+    } else {
+        /* 证明不在线, 保留数据缓存等下上线再发送 */
+        QString name = jsonObj["friendName"].toString();
+
+        if (!this->info.contains(name))
+        {
+            /* 没存在过离线消息, 新建链表串连消息 */
+            QList<QJsonObject> list;
+            list.append(sendJson);
+            this->info.insert(name, list);
+        } else {
+            /* 存在离线消息, 直接在链表上添加元素 */
+            this->info.value(name).toList().append(sendJson);
+        }
+    }
+}
+
+void Server::registration_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    QString userName = jsonObj["userName"].toString();
+    QString password = jsonObj["password"].toString();
+
+    if (this->db.get_users_is_none(userName))
+    {
         QJsonObject sendJson;
 
-        sendJson["type"] = "msg";
-        sendJson["friendName"] = userName;
-        sendJson["data"] = jsonObj["data"].toString();
+        sendJson["type"] = "registration";
+        sendJson["data"] = false;
+        sendJson["error"] = "The account has already been registered";
+        this->sendJson(client, sendJson);
+    } else {
+        QJsonObject sendJson;
+        
+        sendJson["type"] = "registration";
+        sendJson["error"] = "server error";
+        sendJson["data"] = this->db.registrationUser(userName, password);
+        this->sendJson(client, sendJson);
+    }
+}
 
+void Server::loading_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    QString userName = jsonObj["userName"].toString();
+    QJsonObject loadingJson;
+
+    loadingJson["type"] = "friendIds";
+    loadingJson["data"] = this->db.getFriendList(userName);
+
+    qDebug() << "friendsIdLists:" << loadingJson["data"].toArray() << Qt::endl;
+    this->sendJson(client, loadingJson);
+    client->flush();
+}
+
+void Server::friend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    int friendId = jsonObj["data"].toInt();
+    QString friendName = this->db.is_id_to_userName(friendId);
+    QJsonObject sendJson;
+
+    sendJson["type"] = "friend";
+    sendJson["data"] = friendName;
+    this->sendJson(client, sendJson);
+    client->flush();
+}
+
+void Server::loadend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    const QString userName = jsonObj["userName"].toString();
+
+    if (this->info.contains(userName)) 
+    {
+        const auto list = this->info.value(userName).toList();
+
+        for (const auto& item : list) 
+        {
+            this->sendJson(client, item);
+        }
+        this->info.remove(userName);
+        client->flush();
+    }
+}
+
+void Server::loadfriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    QJsonArray data = this->db.loadFriend(jsonObj["data"].toString());
+    QJsonObject sendJson;
+
+    sendJson["type"] = "loadfriend";
+    sendJson["data"] = data;
+
+    qDebug() << sendJson;
+    this->sendJson(client, sendJson);
+    client->flush();
+}
+
+void Server::appendFriend_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
+{
+    QString userName = jsonObj["userName"].toString();
+    QString friendName = jsonObj["friendName"].toString();
+    QJsonObject sendJson;
+
+    sendJson["type"] = "append friend";
+    sendJson["status"] = this->db.appnedFriend(userName, friendName);
+    sendJson["friendName"] = friendName;
+    sendJson["data"] = sendJson["status"].toBool() ? "添加成功" : "添加失败";
+    this->sendJson(client, sendJson);
+    if (sendJson["status"].toBool())
+    {
         if (this->m_clients.contains(friendName))
         {
-            /* 好友在线就直接发送 */
-            QTcpSocket* socket = this->m_clients.value(friendName).first;
+            QTcpSocket* socket = this->m_clients[friendName].first;
+            sendJson["friendName"] = userName;
+            sendJson["type"] = "add friend";
             this->sendJson(socket, sendJson);
             socket->flush();
-        } else {
-            /* 证明不在线, 保留数据缓存等下上线再发送 */
-            QString name = jsonObj["friendName"].toString();
-
-            if (!this->info.contains(name))
-            {
-                /* 没存在过离线消息, 新建链表串连消息 */
-                QList<QJsonObject> list;
-                list.append(sendJson);
-                this->info.insert(name, list);
-            } else {
-                /* 存在离线消息, 直接在链表上添加元素 */
-                this->info.value(name).toList().append(sendJson);
-            }
         }
-    } else if (type == "registration") {
-        QString userName = jsonObj["userName"].toString();
-        QString password = jsonObj["password"].toString();
-
-        if (!this->is_userName_Status(userName))
-        {
-            QJsonObject sendJson;
-
-            sendJson["type"] = "registration";
-            sendJson["data"] = false;
-            sendJson["error"] = "The account has already been registered";
-            this->sendJson(client, sendJson);
-        } else {
-            QJsonObject sendJson;
-            
-            sendJson["type"] = "registration";
-            sendJson["error"] = "server error";
-            sendJson["data"] = this->deleteUser_as_registrationUser(userName, password, true);
-            this->sendJson(client, sendJson);
-        }
-    } else if (type == "loading") {
-        QString userName = jsonObj["userName"].toString();
-        quint64 userId = this->getId(userName);
-        QJsonObject sendJson;
-
-        sendJson["type"] = "friendIds";
-        sendJson["data"] = this->getfriendList(userId);
-
-        qDebug() << "friendsIdLists:" << sendJson["data"].toArray() << Qt::endl;
-        this->sendJson(client, sendJson);
-        client->flush();
-    } else if (type == "friend") {
-        int friendId = jsonObj["data"].toInt();
-        QString friendName = this->getUserName(friendId);
-        QJsonObject sendJson;
-
-        sendJson["type"] = "friend";
-        sendJson["data"] = friendName;
-        this->sendJson(client, sendJson);
-        client->flush();
-    } else if (type == "loadend") {
-        const QString userName = jsonObj["userName"].toString();
-
-        if (this->info.contains(userName)) 
-        {
-            const auto list = this->info.value(userName).toList();
-
-            for (const auto& item : list) 
-            {
-                this->sendJson(client, item);
-            }
-            this->info.remove(userName);
-            client->flush();
-        }
-    } else if (type == "loadfriend") {
-        QJsonArray data = this->loadFriend(dataJson["data"].toString());
-        QJsonObject sendJson;
-
-        sendJson["type"] = "loadfriend";
-        sendJson["data"] = data;
-
-        qDebug() << sendJson;
-        this->sendJson(client, sendJson);
-        client->flush();
-    } else if (type == "append friend") {
-        QString userName = dataJson["userName"].toString();
-         QString friendName = dataJson["friendName"].toString();
-         QJsonObject sendJson;
-        
-         sendJson["type"] = "append friend";
-         sendJson["status"] = this->appnedFriend(userName, friendName);
-         sendJson["friendName"] = friendName;
-         sendJson["data"] = sendJson["status"].toBool() ? "添加成功" : "添加失败";
-         this->sendJson(client, sendJson);
-         if (sendJson["status"].toBool())
-         {
-             if (this->m_clients.contains(userName))
-             {
-                 QTcpSocket* socket = this->m_clients[friendName].first;
-                 sendJson["friendName"] = userName;
-                 sendJson["type"] = "add friend";
-                 this->sendJson(socket, sendJson);
-                 socket->flush();
-             }
-         }
     }
 }
 
 void Server::sendJson(QTcpSocket* client, const QJsonObject& json)
 {
     QByteArray body = QJsonDocument(json).toJson(QJsonDocument::Compact);
-
-    quint32 length = body.size();
+    quint32 length = static_cast<quint32>(body.size());
 
     QByteArray packet;
     QDataStream stream(&packet, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::BigEndian);
 
-    stream << length;
-    packet.append(body);
+    stream << quint16(0xA1A2);
+    stream << quint32(length);
+    stream.writeRawData(body.constData(), body.size());
+    stream << quint16(0xB1B2);
 
-    qDebug() << packet << Qt::endl;
-
+    qDebug() << packet;
     client->write(packet);
-}
-
-bool Server::deleteUser_as_registrationUser(QString userName, QString password, bool flag)
-{
-    QSqlQuery query;
-    if (flag)
-    {
-        query.prepare("INSERT INTO users(account, password) VALUES (:userName, :password);");
-        query.bindValue(":userName", userName);
-        query.bindValue(":password", password);
-    } else {
-        query.prepare("DELETE FROM users WHERE account = :userName;");
-        query.bindValue(":userName", userName);
-    }
-
-    if (!query.exec())
-    {
-        qDebug() << "操作失败：" << query.lastError().text();
-        return false;
-    }
-    qDebug() << "操作成功";
-    return true;
-}
-
-void Server::setloadStatus(int id, bool status)
-{
-    QSqlQuery query;
-    QString sqlStr = QString("UPDATE users SET is_online = %1 WHERE id = :id").arg(status ? 1 : 0);
-    
-    qDebug() << sqlStr << Qt::endl;
-    query.prepare(sqlStr);
-    query.bindValue(":id", id);
-
-    if (!query.exec()) 
-    {
-        qDebug() << "更新失败：" << query.lastError().text();
-        qDebug() << query.lastQuery();
-        qDebug() << query.boundValues();
-    } else {
-        qDebug() << "更新成功，影响行数：" << query.numRowsAffected();
-    }
-}
-
-bool Server::is_userName_Status(QString userName)
-{
-    QSqlQuery query;
-    
-    query.prepare("SELECT * FROM users WHERE account=:userName;");
-    query.bindValue(":userName", userName);
-
-    if (!query.exec())
-    {
-        return false;
-    }
-    if (query.next())
-    {
-        return query.value(0).toBool();
-    }
-
-    return true;
-}
-
-QJsonArray Server::loadFriend(QString data)
-{
-    QSqlQuery query;
-    QString friendName = data;
-
-    friendName = "%" + friendName + "%";
-    query.prepare("SELECT * FROM users WHERE account LIKE :friendName;");
-    query.bindValue(":friendName", friendName);
-
-    if (!query.exec())
-    {
-        return QJsonArray();
-    }
-    QJsonArray Arraydata;
-    while (query.next())
-    {
-        Arraydata.append(query.value("account").toString());
-    }
-
-    return Arraydata;
-}
-
-bool Server::appnedFriend(QString userName, QString friendName)
-{
-    QSqlQuery query;
-
-    query.prepare(R"(INSERT INTO friends (user_id, friend_id, created_at) 
-                    VALUES(:user_id, :friend_id, NOW()), (:friend_id, :user_id, NOW());)");
-    query.bindValue(":user_id", this->getId(userName));
-    query.bindValue(":friend_id", this->getId(friendName));
-
-    if (!query.exec())
-    {
-        return false;
-    }
-
-    return true;
 }
