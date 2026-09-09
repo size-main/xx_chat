@@ -1,7 +1,9 @@
 from pathlib import Path
+import time
+import res
 import style
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QPainter, QPen, QCloseEvent
+from PyQt6.QtGui import QFont, QPainter, QPen, QCloseEvent, QPixmap, QIcon, QColor
 from PyQt6.QtWidgets import (
 	QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
 	QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QStackedWidget,
@@ -43,11 +45,30 @@ class MainWindow(QMainWindow):
 	addFriendRequested = pyqtSignal(str)
 	deleteFriendRequested = pyqtSignal(str)
 
+	@staticmethod
+	def _icon_from_resource(resource_name, fallback_symbol, size=16):
+		icon = QIcon(resource_name)
+		if not icon.isNull():
+			return icon
+		pixmap = QPixmap(size, size)
+		pixmap.fill(Qt.GlobalColor.transparent)
+		painter = QPainter(pixmap)
+		painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+		painter.setBrush(QColor("#4f8df7"))
+		painter.setPen(Qt.PenStyle.NoPen)
+		painter.drawRoundedRect(1, 1, size - 2, size - 2, 4, 4)
+		painter.setPen(Qt.GlobalColor.white)
+		painter.setFont(QFont("Microsoft YaHei UI", max(8, size - 4)))
+		painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, fallback_symbol)
+		painter.end()
+		return QIcon(pixmap)
+
 	def __init__(self, friend_list = None):
 		super().__init__()
 		self._friends = []
 		self._friend_online_status = {}
 		self._chat_previews = {}
+		self._chat_last_time = {}
 		self._chat_unread = set()
 		self._pending_friend = ""
 		self._add_timer = QTimer(self)
@@ -80,7 +101,9 @@ class MainWindow(QMainWindow):
 		side_layout.addWidget(QLabel("在线 · 今天也要保持联系", objectName="account"))
 		side_layout.addSpacing(34)
 		side_layout.addWidget(QLabel("工作台", objectName="sectionTitle"))
-		self.contacts_button = QPushButton("  好友列表", objectName="navButton")
+		self.contacts_button = QPushButton(" 好友列表", objectName="navButton")
+		self.contacts_button.setIcon(self._icon_from_resource(":/mask.svg", "●", 18))
+		self.contacts_button.setIconSize(QSize(18, 18))
 		self.add_button = QPushButton("  添加好友", objectName="navButton")
 		for button in (self.contacts_button, self.add_button):
 			button.setCheckable(True)
@@ -97,7 +120,7 @@ class MainWindow(QMainWindow):
 		header = QHBoxLayout()
 		title_box = QVBoxLayout()
 		title_box.addWidget(QLabel("好友", objectName="pageTitle"))
-		title_box.addWidget(QLabel("选择一个好友，开始新的聊天", objectName="hint"))
+		title_box.addWidget(QLabel("添加一个好友，开始新的聊天", objectName="hint"))
 		header.addLayout(title_box)
 		header.addStretch()
 		self.count_label = QLabel(objectName="hint")
@@ -134,10 +157,18 @@ class MainWindow(QMainWindow):
 		page = QWidget()
 		layout = QVBoxLayout(page)
 		layout.setContentsMargins(0, 4, 0, 0)
+		search_container = QWidget()
+		search_layout = QHBoxLayout(search_container)
+		search_layout.setContentsMargins(8, 0, 8, 0)
+		search_layout.setSpacing(8)
+		search_icon = QLabel()
+		search_icon.setPixmap(self._icon_from_resource(":/find.png", "🔍", 16).pixmap(QSize(16, 16)))
+		search_layout.addWidget(search_icon)
 		self.friend_search = QLineEdit(objectName="searchBox")
 		self.friend_search.setPlaceholderText("搜索好友或群聊")
 		self.friend_search.textChanged.connect(self._filter_friends)
-		layout.addWidget(self.friend_search)
+		search_layout.addWidget(self.friend_search, 1)
+		layout.addWidget(search_container)
 		self.friend_list = QListWidget()
 		self.friend_list.itemClicked.connect(self._friend_clicked)
 		self.friend_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -178,11 +209,18 @@ class MainWindow(QMainWindow):
 	def set_friend_list(self, friends):
 		self._friends = [self._text_value(friend) for friend in friends]
 		self._friends = [friend for friend in self._friends if friend]
+		self._friends = self._sorted_friends(self._friends)
 		self._filter_friends(self.friend_search.text())
 		self.count_label.setText("%d 位联系人" % len(self._friends))
 		if self._loading_overlay is not None:
 			self._loading_overlay.deleteLater()
 			self._loading_overlay = None
+
+	def _sorted_friends(self, friends):
+		return sorted(
+			list(dict.fromkeys(friends)),
+			key=lambda name: (-self._chat_last_time.get(name, 0), name.lower())
+		)
 
 	def remove_friend(self, friend_name):
 		friend_name = self._text_value(friend_name)
@@ -191,6 +229,7 @@ class MainWindow(QMainWindow):
 		self._friends = [friend for friend in self._friends if friend != friend_name]
 		self._friend_online_status.pop(friend_name, None)
 		self._chat_previews.pop(friend_name, None)
+		self._chat_last_time.pop(friend_name, None)
 		self._chat_unread.discard(friend_name)
 		self._filter_friends(self.friend_search.text())
 		self.count_label.setText("%d 位联系人" % len(self._friends))
@@ -202,15 +241,17 @@ class MainWindow(QMainWindow):
 		self._friend_online_status[friend_name] = bool(is_online)
 		self._filter_friends(self.friend_search.text())
 
-	def update_chat_preview(self, friend_name, message, unread=True):
+	def update_chat_preview(self, friend_name, message, unread=True, timestamp=None):
 		friend_name = self._text_value(friend_name)
 		if not friend_name:
 			return
 		self._chat_previews[friend_name] = self._text_value(message).replace("\n", " ")
+		self._chat_last_time[friend_name] = int(float(timestamp)) if timestamp is not None else int(time.time() * 1000)
 		if unread:
 			self._chat_unread.add(friend_name)
 		else:
 			self._chat_unread.discard(friend_name)
+		self._friends = self._sorted_friends(self._friends)
 		self._filter_friends(self.friend_search.text())
 
 	@staticmethod
@@ -219,10 +260,37 @@ class MainWindow(QMainWindow):
 			return value.decode("utf-8", errors="replace").strip()
 		return str(value or "").strip()
 
+	@staticmethod
+	def _avatar_pixmap(friend_name, size=36):
+		pixmap = QPixmap(size, size)
+		pixmap.fill(Qt.GlobalColor.transparent)
+		painter = QPainter(pixmap)
+		painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+		painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+		colors = ["#5b8def", "#50b6a5", "#f7b267", "#d45d79", "#8f7ae5", "#f5a524"]
+		color = colors[sum(ord(ch) for ch in str(friend_name or "A")) % len(colors)]
+		painter.setBrush(QColor(color))
+		painter.setPen(Qt.PenStyle.NoPen)
+		painter.drawEllipse(0, 0, size, size)
+		painter.setPen(Qt.GlobalColor.white)
+		painter.setFont(QFont("Microsoft YaHei UI", max(12, size // 2)))
+		painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, (str(friend_name or "?")[:1]).upper())
+		painter.end()
+		mask = QPixmap(size, size)
+		mask.fill(Qt.GlobalColor.transparent)
+		mask_painter = QPainter(mask)
+		mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+		mask_painter.setBrush(Qt.GlobalColor.white)
+		mask_painter.setPen(Qt.PenStyle.NoPen)
+		mask_painter.drawEllipse(0, 0, size, size)
+		mask_painter.end()
+		pixmap.setMask(mask.createMaskFromColor(Qt.GlobalColor.transparent, Qt.MaskMode.MaskOutColor))
+		return pixmap
+
 	def _filter_friends(self, text):
 		keyword = text.strip().lower()
 		self.friend_list.clear()
-		for friend in self._friends:
+		for friend in self._sorted_friends(self._friends):
 			if keyword in friend.lower():
 				is_online = self._friend_online_status.get(friend, False)
 				item = QListWidgetItem()
@@ -230,9 +298,20 @@ class MainWindow(QMainWindow):
 				item.setData(Qt.ItemDataRole.UserRole + 1, is_online)
 				self.friend_list.addItem(item)
 				row = QWidget()
-				row_layout = QVBoxLayout(row)
-				row_layout.setContentsMargins(0, 0, 0, 0)
-				row_layout.setSpacing(2)
+				main_layout = QHBoxLayout(row)
+				main_layout.setContentsMargins(0, 0, 0, 0)
+				main_layout.setSpacing(10)
+				avatar = QLabel()
+				avatar.setFixedSize(36, 36)
+				avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+				avatar.setPixmap(MainWindow._avatar_pixmap(friend, 36))
+				avatar.setStyleSheet("QLabel { background: transparent; border: 0; }")
+				avatar.setContentsMargins(0, 0, 0, 0)
+				avatar.setScaledContents(True)
+				main_layout.addWidget(avatar)
+				texts = QVBoxLayout()
+				texts.setContentsMargins(0, 0, 0, 0)
+				texts.setSpacing(2)
 				title_layout = QHBoxLayout()
 				title_layout.setContentsMargins(0, 0, 0, 0)
 				name_label = QLabel(friend)
@@ -240,18 +319,20 @@ class MainWindow(QMainWindow):
 				title_layout.addWidget(name_label)
 				title_layout.addStretch()
 				if friend in self._chat_unread:
-					unread_label = QLabel("●")
-					unread_label.setStyleSheet("color: #e5484d; font-size: 14px;")
+					unread_label = QLabel()
+					unread_label.setFixedSize(10, 10)
+					unread_label.setStyleSheet("background: #ff4757; border-radius: 5px;")
 					title_layout.addWidget(unread_label)
-				row_layout.addLayout(title_layout)
+				texts.addLayout(title_layout)
 				preview = self._chat_previews.get(friend, "")
 				preview_label = QLabel(preview)
-				preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+				preview_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
 				preview_label.setStyleSheet("color: #8b96a8; font-size: 12px;")
 				preview_label.setMaximumHeight(20)
-				row_layout.addWidget(preview_label)
+				texts.addWidget(preview_label)
+				main_layout.addLayout(texts, 1)
 				item.setSizeHint(row.sizeHint().expandedTo(row.minimumSizeHint()))
-				item.setSizeHint(item.sizeHint().expandedTo(QSize(0, 52)))
+				item.setSizeHint(item.sizeHint().expandedTo(QSize(0, 56)))
 				self.friend_list.setItemWidget(item, row)
 
 	def _friend_clicked(self, item):

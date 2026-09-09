@@ -5,9 +5,38 @@ msg_window_style = """
         background: #f6f4fb;
     }
 
-    QLabel { 
+    QLabel {
         color: #293047;
         font-family: "Microsoft YaHei UI";
+    }
+
+    QFrame#friendSidebar {
+        background: #eef2ff;
+        border: 1px solid #e1e5f1;
+        border-right: 0;
+    }
+
+    QLabel#sidebarTitle {
+        color: #38205f;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 4px 0 8px;
+    }
+
+    QListWidget {
+        border: 0;
+        background: transparent;
+        outline: 0;
+    }
+
+    QListWidget::item {
+        border-radius: 8px;
+        padding: 8px 10px;
+    }
+
+    QListWidget::item:selected {
+        background: #dce5ff;
+        color: #2d3f8f;
     }
 
     QLabel#friendAccount {
@@ -38,21 +67,33 @@ msg_window_style = """
         border: 1px solid #9b73c7;
     }
 
-    QPushButton#sendButton { 
-        background: #7250a4; 
-        color: #ffffff;
-        border: 0; 
-        border-radius: 7px; 
-        padding: 0 20px; 
-        font-weight: 600; 
+    QPushButton {
+        background: #eef1f7;
+        border: 1px solid #dfe4ee;
+        border-radius: 7px;
+        color: #374151;
+        padding: 6px 12px;
     }
 
-    QPushButton#sendButton:hover { 
-        background: #60418e; 
+    QPushButton:hover {
+        background: #e2e8f6;
     }
-                
-    QPushButton#sendButton:disabled { 
-        background: #c7b9d8; 
+
+    QPushButton#sendButton {
+        background: #7250a4;
+        color: #ffffff;
+        border: 0;
+        border-radius: 7px;
+        padding: 0 20px;
+        font-weight: 600;
+    }
+
+    QPushButton#sendButton:hover {
+        background: #60418e;
+    }
+
+    QPushButton#sendButton:disabled {
+        background: #c7b9d8;
     }
 """
 

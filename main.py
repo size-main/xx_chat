@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QObject, QThread
+from PyQt6.QtCore import QObject
 from PyQt6.QtGui import QIcon
 from client import Client
 from load import load
@@ -19,19 +19,19 @@ class MainCode(QObject):
         self.friendList = list()
         self.client = Client("bc0sd7tr.beesnat.com", 12436)
         self.history = HistoryWorker()
-        self.clientThread = QThread()
         self.load = load()
         self.MainWindow = MainWindow()
         self.msgwindow = MsgWindow()
+        self.client.reconnectStatusChanged.connect(self.load.set_reconnect_state)
         self.setParent(self.MainWindow)
         self.load.show()
-        self.client.moveToThread(self.clientThread)
         self.load.loadSignal.connect(self.__loading_init__)
         self.load.registerSignal.connect(lambda userName, password: self.client.registration_mssge_send(userName, password))
         self.client.registrationChanged.connect(lambda success, message: self.load.register_result(success, message))
         self.MainWindow.chatRequested.connect(self.msgwindow.openMsg)
         self.msgwindow.sendMessage.connect(self.__send_msg_event_handler__)
         self.msgwindow.sendFileRequested.connect(self.__send_file_event_handler__)
+        self.msgwindow.deleteFriendRequested.connect(self.__delete_friend_requested__)
         self.client.fileSendProgress.connect(self.msgwindow.set_file_send_progress)
         self.client.messageReceived.connect(self.__message_received_handler__)
         self.client.fileReceived.connect(self.__file_received_handler__)
@@ -59,6 +59,7 @@ class MainCode(QObject):
         if friendName in self.friendList:
             self.friendList.remove(friendName)
         self.MainWindow.remove_friend(friendName)
+        self.msgwindow.set_friend_list(self.friendList)
         
     def __refresh_friend_list__(self):
         if not self.userName:
@@ -71,6 +72,7 @@ class MainCode(QObject):
     def __load_append_friend_result__(self, friendName: str):
         self.friendList.append(friendName)
         self.MainWindow.set_friend_list(self.friendList)
+        self.msgwindow.set_friend_list(self.friendList)
         self.__load_history_previews__([friendName])
 
     def __handle_append_friend_result__(self, success: bool, message: str, friendName: str):
@@ -78,6 +80,7 @@ class MainCode(QObject):
         if success:
             self.friendList.append(friendName)
             self.MainWindow.set_friend_list(self.friendList)
+            self.msgwindow.set_friend_list(self.friendList)
             self.__load_history_previews__([friendName])
 
     def __load_history_previews__(self, friends):
@@ -141,6 +144,7 @@ class MainCode(QObject):
         self.userName = userName
         self.history.set_user_name(userName)
         self.msgwindow.set_user_name(userName)
+        self.client.set_login_credentials(userName, password)
         self.client.loading_message(userName, password)
 
     def __load_ok_handler__(self):
@@ -165,6 +169,7 @@ class MainCode(QObject):
         self.friendList.append(friendName)
         if self.cnt <= 0:
             self.MainWindow.set_friend_list(self.friendList)
+            self.msgwindow.set_friend_list(self.friendList)
             self.__load_history_previews__(self.friendList)
             self.client.load_end_mssage_end(self.userName)
             return

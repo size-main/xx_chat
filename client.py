@@ -1,7 +1,7 @@
 import sys
 import base64
 import binascii
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtNetwork import QTcpSocket
 from PyQt6.QtWidgets import QMessageBox
 import json
@@ -21,6 +21,7 @@ class Client(QObject):
     loadAppendFriendChanged = pyqtSignal(str)
     friend_lost_connection = pyqtSignal(str, bool)
     delete_friend_lostChanged = pyqtSignal(str)
+    reconnectStatusChanged = pyqtSignal(bool, str)
 
     HEAD_MARK = 0xA1A2
     TAIL_MARK = 0xB1B2
@@ -29,13 +30,31 @@ class Client(QObject):
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8888):
         super().__init__()
+        self.host = host
+        self.port = port
         self.socket = QTcpSocket()
         self._receive_buffer = bytearray()
-        self.socket.connectToHost(host, port)
+        self._last_login = ("", "")
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.timeout.connect(self._attempt_reconnect)
+        self._reconnect_count = 0
+        self._is_reconnecting = False
+        self._last_reconnect_status = None
+        self._last_reconnect_message = ""
+        self._reconnect_phase = False
+        self._last_socket_state = None
+        self._health_timer = QTimer(self)
+        self._health_timer.setInterval(3000)
+        self._health_timer.timeout.connect(self._health_check)
+        self.socket.stateChanged.connect(self._on_socket_state_changed)
+        self.socket.connected.connect(self._on_socket_connected)
         self.socket.readyRead.connect(self.receive_message)
-        self.socket.disconnected.connect(lambda: QMessageBox.warning(None, "警告", "服务器断开"))
-        self.socket.errorOccurred.connect(lambda: QMessageBox.warning(None, "警告", "服务器连接失败"))
-        self. type_handler = {
+        self.socket.disconnected.connect(self._on_socket_disconnected)
+        self.socket.errorOccurred.connect(self._on_socket_error)
+        self._health_timer.start()
+        self._connect_socket()
+        self.type_handler = {
             "load": lambda json_data: self.loadStatusChanged.emit(json_data.get("status") == "enable"),
             "friendIds": lambda json_data: self.friendIdReadyChanged.emit(json_data.get("data", [])),
             "friend": lambda json_data: self.friendReadChanged.emit(json_data.get("data", "")),
@@ -53,9 +72,107 @@ class Client(QObject):
             "delete": self._handle_delete_friend_event
         }
 
+    def _connect_socket(self):
+        if self.socket.state() == QTcpSocket.SocketState.ConnectedState:
+            return
+        self.socket.abort()
+        self.socket.connectToHost(self.host, self.port)
+
+    def _set_reconnect_status(self, reconnecting: bool, message: str = ""):
+        if reconnecting == self._last_reconnect_status:
+            return
+        self._last_reconnect_status = reconnecting
+        self._last_reconnect_message = message
+        self.reconnectStatusChanged.emit(reconnecting, message)
+
+    def _health_check(self):
+        if self.socket.state() in (QTcpSocket.SocketState.UnconnectedState, QTcpSocket.SocketState.ClosingState):
+            if not self._is_reconnecting and not self._reconnect_phase:
+                self._schedule_reconnect()
+
+    def _on_socket_state_changed(self, state):
+        if state == self._last_socket_state:
+            return
+        self._last_socket_state = state
+
+        if state == QTcpSocket.SocketState.ConnectedState:
+            self._reconnect_phase = False
+            self._is_reconnecting = False
+            self._set_reconnect_status(False, "")
+            return
+
+        if state in (QTcpSocket.SocketState.UnconnectedState, QTcpSocket.SocketState.ClosingState):
+            if not self._reconnect_phase and not self._is_reconnecting:
+                self._schedule_reconnect()
+
+    def _on_socket_connected(self):
+        self._last_socket_state = QTcpSocket.SocketState.ConnectedState
+        self._reconnect_phase = False
+        self._is_reconnecting = False
+        self._reconnect_count = 0
+        self._health_timer.start()
+        self._set_reconnect_status(False, "")
+        self._relogin_if_needed()
+
+    def _on_socket_disconnected(self):
+        if self._reconnect_phase:
+            return
+        self._last_socket_state = QTcpSocket.SocketState.UnconnectedState
+        self._reconnect_phase = True
+        self._set_reconnect_status(True, "服务器连接断开，正在重连...")
+        self._schedule_reconnect()
+
+    def _on_socket_error(self, socket_error):
+        if self._reconnect_phase:
+            return
+        state = self.socket.state()
+        if state not in (QTcpSocket.SocketState.ConnectingState, QTcpSocket.SocketState.ConnectedState):
+            self._last_socket_state = QTcpSocket.SocketState.UnconnectedState
+            self._reconnect_phase = True
+            self._set_reconnect_status(True, "连接失败，正在重连...")
+            self._schedule_reconnect()
+
+    def _schedule_reconnect(self):
+        if self._is_reconnecting:
+            return
+        self._is_reconnecting = True
+        self._reconnect_phase = True
+        if self._last_reconnect_status is not True:
+            self._set_reconnect_status(True, "服务器连接断开，正在重连...")
+        delay = min(max(self._reconnect_count, 1) * 1000, 8000)
+        self._reconnect_timer.start(delay)
+
+    def _attempt_reconnect(self):
+        self._is_reconnecting = False
+        if self.socket.state() == QTcpSocket.SocketState.ConnectedState:
+            self._reconnect_phase = False
+            self._set_reconnect_status(False, "")
+            return
+
+        self._reconnect_count += 1
+        self.socket.abort()
+        self.socket.connectToHost(self.host, self.port)
+        if self.socket.state() not in (
+            QTcpSocket.SocketState.ConnectedState,
+            QTcpSocket.SocketState.ConnectingState,
+        ):
+            self._schedule_reconnect()
+
+    def _relogin_if_needed(self):
+        user_name, password = self._last_login
+        if user_name and password:
+            self.loading_message(user_name, password)
+
+    def set_login_credentials(self, user_name: str, password: str):
+        self._last_login = (str(user_name or "").strip(), str(password or ""))
+
     def _handle_delete_friend_event(self, json_data):
         friend_name = json_data.get("friendName", json_data.get("data", ""))
         self.delete_friend_lostChanged.emit(str(friend_name).strip())
+
+    def hash_password_(self, password: str) -> str:
+        
+        return ""    
 
     def _handle_file_event(self, json_data):
         friend_name = str(json_data.get("friendName", "")).strip()
@@ -108,6 +225,7 @@ class Client(QObject):
         self.__self_sender_msg__(json.dumps(data))
          
     def loading_message(self, userName: str, password: str):
+        self.set_login_credentials(userName, password)
         data = {
             "type": "load",
             "userName": userName,
