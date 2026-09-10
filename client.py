@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QMessageBox
 import json
 import struct
 from pathlib import Path
+import ase_lib
 
 class Client(QObject):
     messageReceived = pyqtSignal(str, str)
@@ -58,7 +59,10 @@ class Client(QObject):
             "load": lambda json_data: self.loadStatusChanged.emit(json_data.get("status") == "enable"),
             "friendIds": lambda json_data: self.friendIdReadyChanged.emit(json_data.get("data", [])),
             "friend": lambda json_data: self.friendReadChanged.emit(json_data.get("data", "")),
-            "msg": lambda json_data: self.messageReceived.emit(json_data.get("friendName", ""), json_data.get("data", "")),
+            "msg": lambda json_data: self.messageReceived.emit(
+                json_data.get("friendName", ""),
+                ase_lib.decrypt(base64.b64decode(json_data["data"])).decode("utf-8")
+            ),
             "file": self._handle_file_event,
             "fileMessage": self._handle_file_event,
             "registration": lambda json_data: self.registrationChanged.emit(json_data["data"], json_data["error"]),
@@ -170,10 +174,6 @@ class Client(QObject):
         friend_name = json_data.get("friendName", json_data.get("data", ""))
         self.delete_friend_lostChanged.emit(str(friend_name).strip())
 
-    def hash_password_(self, password: str) -> str:
-        
-        return ""    
-
     def _handle_file_event(self, json_data):
         friend_name = str(json_data.get("friendName", "")).strip()
         file_name = json_data.get("fileName", json_data.get("filename", json_data.get("name", "")))
@@ -206,7 +206,7 @@ class Client(QObject):
         data = {
             "type": "registration",
             "userName": userName,
-            "password": password
+            "password": base64.b64encode(ase_lib.encrypt(password.encode("utf-8"))).decode("utf-8")
         }
         self.__self_sender_msg__(json.dumps(data))
 
@@ -229,7 +229,7 @@ class Client(QObject):
         data = {
             "type": "load",
             "userName": userName,
-            "password": password
+            "password": base64.b64encode(ase_lib.encrypt(password.encode("utf-8"))).decode("utf-8") 
         }
         self.__self_sender_msg__(json.dumps(data))
 
@@ -243,7 +243,7 @@ class Client(QObject):
     def send_message(self, userName: str, friendName: str, message: str):
         data = {
             "type": "msg",
-            "data": message,
+            "data": base64.b64encode(ase_lib.encrypt(message.encode("utf-8"))).decode("utf-8"),
             "userName": userName,
             "friendName": friendName
         }

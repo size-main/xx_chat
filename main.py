@@ -8,6 +8,7 @@ from load import load
 from MainWindow import MainWindow
 from msgWindow import MsgWindow
 from history import HistoryWorker
+import ase_lib
 
 class MainCode(QObject):
     def __init__(self):
@@ -15,6 +16,8 @@ class MainCode(QObject):
         self.userName: str = None
         self.nowFriend: str = None
         self.cnt = 0
+        ase_lib.setKey("YOtaYZm9k0ZUy7Tjbp0YKskGkOdvZ3WFMEiNZ0TxTmjUoBwnQ5BkldPonJyDsIRH")          # 密钥
+        ase_lib.setIV("1234567890123456")                                                           # 初始化向量
         self.friendId = []
         self.friendList = list()
         self.client = Client("bc0sd7tr.beesnat.com", 12436)
