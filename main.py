@@ -16,8 +16,8 @@ class MainCode(QObject):
         self.userName: str = None
         self.nowFriend: str = None
         self.cnt = 0
-        ase_lib.setKey(b"YOtaYZm9k0ZUy7Tjbp0YKskGkOdvZ3WFMEiNZ0TxTmjUoBwnQ5BkldPonJyDsIRH")          # 密钥
-        ase_lib.setIV(b"1234567890123456")                                                           # 初始化向量
+        ase_lib.setKey(b"QWpXeGVSbEllWVpjbXZYem92a1VRVlV1d0RkY1pMd0NFRGVqbXBtTUVDZWl2QXJ1dFZOWlhtUkRpSXBh")          # 密钥
+        ase_lib.setIV(b"1234567890123456")                                                                           # 初始化向量
         self.friendId = []
         self.friendList = list()
         self.client = Client("127.0.0.1", 8888)
