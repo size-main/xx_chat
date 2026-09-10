@@ -20,7 +20,7 @@ class MainCode(QObject):
         ase_lib.setIV(b"1234567890123456")                                                           # 初始化向量
         self.friendId = []
         self.friendList = list()
-        self.client = Client("bc0sd7tr.beesnat.com", 12436)
+        self.client = Client("127.0.0.1", 8888)
         self.history = HistoryWorker()
         self.load = load()
         self.MainWindow = MainWindow()
