@@ -16,10 +16,12 @@ using ClinetInfotype = QHash<QTcpSocket*, QString>;                             
 using onlineInfo = QHash<QString, QList<QJsonObject>>;                                              // 离线消息
 using type_function_Info = QHash<QString, std::function<void (QTcpSocket*&, QJsonObject&)>>;        // 通过消息类型调用不同的回调函数
 
-class Server : public QObject {
+class Server : public QTcpServer {
     Q_OBJECT
 public:
     Server(QObject* parent = nullptr);
+protected:
+    void incomingConnection(qintptr socketDescriptor) override;
 private:
     void onNewConnection(void);
     void disConnection(void);
@@ -40,7 +42,6 @@ private:
     void sendJson(QTcpSocket* client, const QJsonObject& json);
 private:
     DatabaseManager db;
-    QTcpServer* server = nullptr;
     ClientInfo m_clients;
     ClinetInfotype online_Client;
     onlineInfo info;

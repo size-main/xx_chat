@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QSqlError>
 #include <QString>
+#include "ase_lib.h"
 
 DatabaseManager::DatabaseManager(QObject* parent)
 {
@@ -58,7 +59,7 @@ int DatabaseManager::is_userName_to_id(QString userName)
 QJsonArray DatabaseManager::getFriendList(QString userName)
 {
     QJsonArray friendList;
-    QSqlQuery query;
+    QSqlQuery query(this->db);
 
     query.prepare(R"(
         SELECT f.friend_id
@@ -88,6 +89,7 @@ bool DatabaseManager::load_userName(QString userName, QString password)
         return false;
     }
     QSqlQuery query(this->db);
+    
     query.prepare(R"(
         SELECT id, account
         FROM users
@@ -95,7 +97,7 @@ bool DatabaseManager::load_userName(QString userName, QString password)
         AND password = :password
     )");
     query.bindValue(":account", userName);
-    query.bindValue(":password", password);
+    query.bindValue(":password", this->Base64_decode(password));
     if (!query.exec())
     {
         return false;
@@ -112,11 +114,11 @@ bool DatabaseManager::load_userName(QString userName, QString password)
 
 bool DatabaseManager::registrationUser(QString userName, QString password)
 {
-    QSqlQuery query;
+    QSqlQuery query(this->db);
 
     query.prepare("INSERT INTO users(account, password) VALUES (:userName, :password);");
     query.bindValue(":userName", userName);
-    query.bindValue(":password", password);
+    query.bindValue(":password", this->Base64_decode(password));
     if (!query.exec())
     {
         qDebug() << "操作失败：" << query.lastError().text();
@@ -147,7 +149,7 @@ bool DatabaseManager::get_users_is_none(QString userName)
 
 void DatabaseManager::setusersStatus(QString userName, bool status)
 {
-    QSqlQuery query;
+    QSqlQuery query(this->db);
     query.prepare(R"(
         UPDATE users
         SET is_online = :status
@@ -165,7 +167,7 @@ void DatabaseManager::setusersStatus(QString userName, bool status)
 
 QJsonArray DatabaseManager::loadFriend(QString data)
 {
-    QSqlQuery query;
+    QSqlQuery query(this->db);
     QString friendName = data;
 
     friendName = "%" + friendName + "%";
@@ -187,7 +189,7 @@ QJsonArray DatabaseManager::loadFriend(QString data)
 
 bool DatabaseManager::appnedFriend(QString userName, QString friendName)
 {
-    QSqlQuery query;
+    QSqlQuery query(this->db);
 
     query.prepare(R"(
         INSERT INTO friends (user_id, friend_id, created_at)
@@ -224,7 +226,7 @@ bool DatabaseManager::appnedFriend(QString userName, QString friendName)
 
 bool DatabaseManager::deleteFriend(QString userName, QString friendName)
 {
-    QSqlQuery query;
+    QSqlQuery query(this->db);
 
     query.prepare(R"(
         DELETE f
@@ -247,4 +249,13 @@ bool DatabaseManager::deleteFriend(QString userName, QString friendName)
         return false;
     }
     return true;
+}
+
+QString DatabaseManager::Base64_decode(QString& data)
+{
+    QString b64 = data;
+    QByteArray cipher = QByteArray::fromBase64(b64.toUtf8());
+    const char* plain = decrypt(cipher.constData());
+
+    return QString::fromUtf8(plain);
 }

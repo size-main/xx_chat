@@ -22,6 +22,7 @@ public:
     QJsonArray loadFriend(QString data);
     bool appnedFriend(QString userName, QString friendName);
     bool deleteFriend(QString userName, QString friendName);
+    QString Base64_decode(QString& data);
 private:
     QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL");
 };

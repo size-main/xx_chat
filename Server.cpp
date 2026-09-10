@@ -1,25 +1,25 @@
 #include "Server.h"
+#include "ase_lib.h"
 #include <QJsonDocument>
 
 Server::Server(QObject* parent)
-    : QObject(parent)
+    : QTcpServer(parent)
 {
-    server = new QTcpServer(this);
-    server->listen(QHostAddress::Any, 8888);
+    this->listen(QHostAddress::Any, 8888);
     this->init_type_hash();
-    connect(server, &QTcpServer::newConnection, this, &Server::onNewConnection);
+    setKey("YOtaYZm9k0ZUy7Tjbp0YKskGkOdvZ3WFMEiNZ0TxTmjUoBwnQ5BkldPonJyDsIRH");             // 加密密钥
+    setIV("1234567890123456");                                      
 }
 
-void Server::onNewConnection(void)
+void Server::incomingConnection(qintptr socketDescriptor)
 {
-    QTcpSocket* client = this->server->nextPendingConnection();
-
-    if (client)
+    QTcpSocket* socket = new QTcpSocket(nullptr);
+    if (socket->setSocketDescriptor(socketDescriptor)) 
     {
-        connect(client, &QTcpSocket::disconnected, this, &Server::disConnection);
-        connect(client, &QTcpSocket::readyRead, this, &Server::ReadyRead_Thread);
+        connect(socket, &QTcpSocket::readyRead, this, &Server::ReadyRead_Thread);
+        connect(socket, &QTcpSocket::disconnected, this, &Server::disConnection);
     } else {
-        qDebug() << "错误连接" << Qt::endl;
+        delete socket;  
     }
 }
 
@@ -146,6 +146,7 @@ void Server::load_type_handler(QTcpSocket*& client, QJsonObject& json)
         client->moveToThread(thread);
         this->m_clients.insert(userName, infoData);
         this->db.setusersStatus(userName, true);
+        thread->start();
     }
 }
 
@@ -160,7 +161,7 @@ void Server::msg_type_handler(QTcpSocket*& client, QJsonObject& jsonObj)
 
     sendJson["type"] = "msg";
     sendJson["friendName"] = userName;
-    sendJson["data"] = jsonObj["data"].toString();
+    sendJson["data"] = jsonObj["data"];
 
     if (this->m_clients.contains(friendName))
     {
