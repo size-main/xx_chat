@@ -7,7 +7,7 @@ Server::Server(QObject* parent)
 {
     this->listen(QHostAddress::Any, 8888);
     this->init_type_hash();
-    setKey("YOtaYZm9k0ZUy7Tjbp0YKskGkOdvZ3WFMEiNZ0TxTmjUoBwnQ5BkldPonJyDsIRH");             // 加密密钥
+    setKey("QWpXeGVSbEllWVpjbXZYem92a1VRVlV1d0RkY1pMd0NFRGVqbXBtTUVDZWl2QXJ1dFZOWlhtUkRpSXBh");             // 加密密钥
     setIV("1234567890123456");                                      
 }
 
